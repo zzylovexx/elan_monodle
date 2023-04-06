@@ -7,4 +7,11 @@ train.log
 __pycache__/
 *.log
 *.pth
+*.png
+*.txt
+*.train.log.
 /checkpoints/
+experiments/example/outputs/
+experiments/example/outputs_test/
+experiments/example/outputs_video/data
+log
