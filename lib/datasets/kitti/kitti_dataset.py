@@ -2,13 +2,13 @@ import os
 import numpy as np
 import torch.utils.data as data
 from PIL import Image
-import sys
-BASE_DIR=os.path.dirname(os.path.abspath(__file__))
-ROOT_DIR=os.path.dirname(os.path.dirname(os.path.dirname(BASE_DIR)))
+#import sys
+#BASE_DIR=os.path.dirname(os.path.abspath(__file__))
+#ROOT_DIR=os.path.dirname(os.path.dirname(os.path.dirname(BASE_DIR)))
 # # print('BASE_DIR',BASE_DIR)
 # # print('root_dir',root_dir)
 # # print(sys.path)
-sys.path.append(ROOT_DIR)
+#sys.path.append(ROOT_DIR)
 
 from lib.datasets.utils import angle2class
 from lib.datasets.utils import gaussian_radius

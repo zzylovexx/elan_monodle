@@ -2,7 +2,7 @@ random_seed: 444
 
 dataset:
   type: &dataset_type 'KITTI'
-  batch_size: 16
+  batch_size: 8
   use_3d_center: True
   class_merging: False
   use_dontcare: False
@@ -31,8 +31,8 @@ lr_scheduler:
   decay_list: [90, 120]
 
 trainer:
-  max_epoch: 140
-  gpu_ids: 0, 1
+  max_epoch: 100
+  gpu_ids: 0,0
   save_frequency: 10 # checkpoint save interval (in epoch)
   # resume_model: 'checkpoints/checkpoint_epoch_70.pth'
 
@@ -40,6 +40,6 @@ trainer:
 tester:
   type: *dataset_type
   mode: single   # 'single' or 'all'
-  checkpoint: 'checkpoints/checkpoint_epoch_140.pth'  # for 'single' mode
+  checkpoint: 'experiments/example/checkpoints/checkpoint_epoch_20.pth'  # for 'single' mode
   checkpoints_dir: 'checkpoints'  # for 'all' model
   threshold: 0.2  # confidence filter
