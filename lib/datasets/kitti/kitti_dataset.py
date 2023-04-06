@@ -2,6 +2,13 @@ import os
 import numpy as np
 import torch.utils.data as data
 from PIL import Image
+import sys
+BASE_DIR=os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR=os.path.dirname(os.path.dirname(os.path.dirname(BASE_DIR)))
+# # print('BASE_DIR',BASE_DIR)
+# # print('root_dir',root_dir)
+# # print(sys.path)
+sys.path.append(ROOT_DIR)
 
 from lib.datasets.utils import angle2class
 from lib.datasets.utils import gaussian_radius
@@ -15,10 +22,13 @@ from lib.datasets.kitti.kitti_eval_python.eval import get_distance_eval_result
 import lib.datasets.kitti.kitti_eval_python.kitti_common as kitti
 
 
+
 class KITTI_Dataset(data.Dataset):
     def __init__(self, split, cfg):
         # basic configuration
-        self.root_dir = cfg.get('root_dir', '../../data/KITTI')
+        # self.root_dir = cfg.get('root_dir', '../../data/KITTI')
+        self.root_dir = cfg.get('root_dir', 'data/KITTI')
+        print(self.root_dir)
         self.split = split
         self.num_classes = 3
         self.max_objs = 50
@@ -41,16 +51,23 @@ class KITTI_Dataset(data.Dataset):
 
 
         # data split loading
-        assert self.split in ['train', 'val', 'trainval', 'test']
+        assert self.split in ['train', 'val', 'trainval', 'test', 'video']
         self.split_file = os.path.join(self.root_dir, 'ImageSets', self.split + '.txt')
         self.idx_list = [x.strip() for x in open(self.split_file).readlines()]
 
         # path configuration
-        self.data_dir = os.path.join(self.root_dir, 'object', 'testing' if split == 'test' else 'training')
-        self.image_dir = os.path.join(self.data_dir, 'image_2')
+        if split=='video':
+            self.data_dir=os.path.join(self.root_dir,'object','testvideo2')
+            self.image_dir = os.path.join(self.data_dir, 'data')
+        else :
+            self.data_dir = os.path.join(self.root_dir, 'object', 'testing' if split == 'test' else 'training') #video is my custom origin is testing and test
+        
+        self.image_dir=os.path.join(self.data_dir,'image_2')
+        print(self.data_dir)   
         self.depth_dir = os.path.join(self.data_dir, 'depth')
         self.calib_dir = os.path.join(self.data_dir, 'calib')
-        self.label_dir = os.path.join(self.data_dir, 'label_2')
+        self.label_dir = os.path.join(self.data_dir, 'label_2_new')
+       
 
         # data augmentation configuration
         self.data_augmentation = True if split in ['train', 'trainval'] else False
@@ -74,7 +91,8 @@ class KITTI_Dataset(data.Dataset):
 
 
     def get_image(self, idx):
-        img_file = os.path.join(self.image_dir, '%06d.png' % idx)
+        img_file = os.path.join(self.image_dir, '%06d.png' % idx) #origin is 06
+        #print(img_file)
         assert os.path.exists(img_file)
         return Image.open(img_file)
 
@@ -82,6 +100,7 @@ class KITTI_Dataset(data.Dataset):
     def get_label(self, idx):
         label_file = os.path.join(self.label_dir, '%06d.txt' % idx)
         assert os.path.exists(label_file)
+        #print(label_file)
         return get_objects_from_label(label_file)
 
 
@@ -102,7 +121,20 @@ class KITTI_Dataset(data.Dataset):
         for category in self.writelist:
             results_str, results_dict = get_official_eval_result(gt_annos, dt_annos, test_id[category])
             logger.info(results_str)
+    def cal_theta_ray(self,box_2d,proj_metric):
+        width=1242
+        fovx = 2 * np.arctan(width / (2 * proj_metric[0][0]))
+        center = (box_2d[0] + box_2d[2]) / 2
+        dx = center - (width / 2)
+        mult = 1
+        if dx < 0:
+            mult = -1
+        dx = abs(dx)
+        angle = np.arctan( (2*dx*np.tan(fovx/2)) / width )
+        angle = angle * mult
 
+        return angle
+            
 
     def __len__(self):
         return self.idx_list.__len__()
@@ -123,6 +155,7 @@ class KITTI_Dataset(data.Dataset):
         if self.data_augmentation:
             if np.random.random() < self.random_flip:
                 random_flip_flag = True
+                #random_flip_flag=False
                 img = img.transpose(Image.FLIP_LEFT_RIGHT)
 
             if np.random.random() < self.random_crop:
@@ -147,7 +180,7 @@ class KITTI_Dataset(data.Dataset):
                 'img_size': img_size,
                 'bbox_downsample_ratio': img_size/features_size}
 
-        if self.split == 'test':
+        if self.split == 'test': #or test
             return img, img, info   # img / placeholder(fake label) / info
 
 
@@ -184,10 +217,13 @@ class KITTI_Dataset(data.Dataset):
         src_size_3d = np.zeros((self.max_objs, 3), dtype=np.float32)
         size_3d = np.zeros((self.max_objs, 3), dtype=np.float32)
         offset_3d = np.zeros((self.max_objs, 2), dtype=np.float32)
-        indices = np.zeros((self.max_objs), dtype=np.int64)
+        indices = np.zeros((self.max_objs), dtype=np.int64) #應該是用來儲存物體在heatmap中的索引值
         mask_2d = np.zeros((self.max_objs), dtype=np.uint8)
         mask_3d = np.zeros((self.max_objs), dtype=np.uint8)
+        group_mask=np.zeros((self.max_objs),dtype=np.uint8)
+        theta_ray=np.zeros((self.max_objs),dtype=np.float32) 
         object_num = len(objects) if len(objects) < self.max_objs else self.max_objs
+        
         for i in range(object_num):
             # filter objects by writelist
             if objects[i].cls_type not in self.writelist:
@@ -199,12 +235,13 @@ class KITTI_Dataset(data.Dataset):
 
             # ignore the samples beyond the threshold [hard encoding]
             threshold = 65
-            if objects[i].pos[-1] > threshold:
+            if objects[i].pos[-1] > threshold: #objects[i].pos[-1] is depth this line means that depth is longer than 65 can ignore
                 continue
 
             # process 2d bbox & get 2d center
+            
             bbox_2d = objects[i].box2d.copy()
-
+    
             # add affine transformation for 2d boxes.
             bbox_2d[:2] = affine_transform(bbox_2d[:2], trans)
             bbox_2d[2:] = affine_transform(bbox_2d[2:], trans)
@@ -217,6 +254,7 @@ class KITTI_Dataset(data.Dataset):
             center_3d = center_3d.reshape(-1, 3)  # shape adjustment (N, 3)
             center_3d, _ = calib.rect_to_img(center_3d)  # project 3D center to image plane
             center_3d = center_3d[0]  # shape adjustment
+            #print(center_3d)
             if random_flip_flag:  # random flip for center3d
                 center_3d[0] = img_size[0] - center_3d[0]
             center_3d = affine_transform(center_3d.reshape(-1), trans)
@@ -224,6 +262,7 @@ class KITTI_Dataset(data.Dataset):
 
             # generate the center of gaussian heatmap [optional: 3d center or 2d center]
             center_heatmap = center_3d.astype(np.int32) if self.use_3d_center else center_2d.astype(np.int32)
+            
             if center_heatmap[0] < 0 or center_heatmap[0] >= features_size[0]: continue
             if center_heatmap[1] < 0 or center_heatmap[1] >= features_size[1]: continue
 
@@ -240,7 +279,7 @@ class KITTI_Dataset(data.Dataset):
             draw_umich_gaussian(heatmap[cls_id], center_heatmap, radius)
 
             # encoding 2d/3d offset & 2d size
-            indices[i] = center_heatmap[1] * features_size[0] + center_heatmap[0]
+            indices[i] = center_heatmap[1] * features_size[0] + center_heatmap[0] #indices 搞不太清楚
             offset_2d[i] = center_2d - center_heatmap
             size_2d[i] = 1. * w, 1. * h
 
@@ -248,8 +287,12 @@ class KITTI_Dataset(data.Dataset):
             depth[i] = objects[i].pos[-1] * aug_scale
 
             # encoding heading angle
-            heading_angle = objects[i].alpha
+            heading_angle = objects[i].alpha 
+            #heading_angle = objects[i].ry
             heading_bin[i], heading_res[i] = angle2class(heading_angle)
+            #cal theta_ray
+            cal_angle=self.cal_theta_ray(objects[i].box2d,calib.P2)
+            theta_ray[i]=cal_angle
 
             # encoding 3d offset & size_3d
             offset_3d[i] = center_3d - center_heatmap
@@ -259,7 +302,8 @@ class KITTI_Dataset(data.Dataset):
 
             mask_2d[i] = 1
             mask_3d[i] = 0 if random_crop_flag else 1
-
+            group_mask[i]=objects[i].group
+            
 
         # collect return data
         inputs = img
@@ -274,7 +318,9 @@ class KITTI_Dataset(data.Dataset):
                    'heading_bin': heading_bin,
                    'heading_res': heading_res,
                    'mask_2d': mask_2d,
-                   'mask_3d': mask_3d}
+                   'mask_3d': mask_3d,
+                   'group':group_mask}
+        #print(inputs)
         info = {'img_id': index,
                 'img_size': img_size,
                 'bbox_downsample_ratio': img_size/features_size}

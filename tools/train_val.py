@@ -28,6 +28,7 @@ args = parser.parse_args()
 
 
 def main():
+    
     assert (os.path.exists(args.config))
     cfg = yaml.load(open(args.config, 'r'), Loader=yaml.Loader)
     set_random_seed(cfg.get('random_seed', 444))

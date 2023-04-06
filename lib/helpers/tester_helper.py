@@ -86,7 +86,7 @@ class Tester(object):
 
         # save the result for evaluation.
         self.logger.info('==> Saving ...')
-        self.save_results(results)
+        self.save_results(results,self.output_dir)
 
 
 

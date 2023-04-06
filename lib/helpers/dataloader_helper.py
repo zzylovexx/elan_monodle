@@ -13,7 +13,7 @@ def build_dataloader(cfg, workers=4):
     # perpare dataset
     if cfg['type'] == 'KITTI':
         train_set = KITTI_Dataset(split='train', cfg=cfg)
-        test_set = KITTI_Dataset(split='val', cfg=cfg)
+        test_set = KITTI_Dataset(split='val', cfg=cfg) #video is my own customize
     else:
         raise NotImplementedError("%s dataset is not supported" % cfg['type'])
 
