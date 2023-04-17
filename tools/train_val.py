@@ -32,7 +32,9 @@ def main():
     assert (os.path.exists(args.config))
     cfg = yaml.load(open(args.config, 'r'), Loader=yaml.Loader)
     set_random_seed(cfg.get('random_seed', 444))
+    os.makedirs('runlog',exist_ok=True)
     log_file = 'train.log.%s' % datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_file=os.path.join('runlog',log_file)
     logger = create_logger(log_file)
 
 

@@ -88,8 +88,8 @@ class Trainer(object):
 
             # save trained model
             if (self.epoch % self.cfg['save_frequency']) == 0:
-                os.makedirs('checkpointry', exist_ok=True)
-                ckpt_name = os.path.join('checkpointry', 'checkpoint_epoch_%d' % self.epoch)
+                os.makedirs('checkpoint_first_group', exist_ok=True)
+                ckpt_name = os.path.join('checkpoint_first_group', 'checkpoint_epoch_%d' % self.epoch)
                 save_checkpoint(get_checkpoint_state(self.model, self.optimizer, self.epoch), ckpt_name)
 
             progress_bar.update()
@@ -100,9 +100,10 @@ class Trainer(object):
 
     def train_one_epoch(self):
         self.model.train()
-        loss_dicts={"total_loss":0,'seg':0,'offset2d':0,'size2d':0,'offset3d':0,'depth':0,'size3d':0,'heading_cls':0,'heading_reg':0,'grouploss':0}
+        loss_dicts={"total_loss":0,'seg':0,'offset2d':0,'size2d':0,'offset3d':0,'depth':0,'size3d':0,
+        'heading_cls':0,'heading_reg':0,'grouploss':0}
         progress_bar = tqdm.tqdm(total=len(self.train_loader), leave=(self.epoch+1 == self.cfg['max_epoch']), desc='iters')
-        for batch_idx, (inputs, targets, _) in enumerate(self.train_loader):
+        for batch_idx, (inputs, targets, info) in enumerate(self.train_loader):
             inputs = inputs.to(self.device)
             for key in targets.keys():
                 targets[key] = targets[key].to(self.device)
@@ -110,7 +111,7 @@ class Trainer(object):
             # train one batch
             self.optimizer.zero_grad()
             outputs = self.model(inputs)
-            total_loss, stats_batch = compute_centernet3d_loss(outputs, targets)
+            total_loss, stats_batch = compute_centernet3d_loss(outputs, targets,info)
             loss_dicts["total_loss"]+=total_loss.item()
             loss_dicts['seg']+=stats_batch['seg']
             loss_dicts['offset2d']+=stats_batch['offset2d']
@@ -122,28 +123,22 @@ class Trainer(object):
             loss_dicts['heading_reg']+=stats_batch['heading_reg']
             loss_dicts['grouploss']+=stats_batch['grouploss']
 
-            # writer.add_scalar('loss/total_loss',total_loss,batch_idx)
-            # writer.add_scalar('loss/seg_loss',stats_batch['seg'],batch_idx)
-            # writer.add_scalar('loss/offset2d_loss',stats_batch['offset2d'],batch_idx)
-            # writer.add_scalar('loss/size_loss',stats_batch['size2d'],batch_idx)
-            # writer.add_scalar('loss/offset3d_loss',stats_batch['offset3d'],batch_idx)
-            # writer.add_scalar('loss/depth_loss',stats_batch['depth'],batch_idx)
-            # writer.add_scalar('loss/size3d_loss',stats_batch['size3d'],batch_idx)
-            # writer.add_scalar('loss/heading_loss',stats_batch['heading'],batch_idx)
-            
+            writer.add_scalar('perbatch_loss/total_loss',total_loss,batch_idx)
+            writer.add_scalar('perbatch_loss/seg_loss',stats_batch['seg'],batch_idx)
+            writer.add_scalar('perbatch_loss/offset2d_loss',stats_batch['offset2d'],batch_idx)
+            writer.add_scalar('perbatch_loss/size_loss',stats_batch['size2d'],batch_idx)
+            writer.add_scalar('perbatch_loss/offset3d_loss',stats_batch['offset3d'],batch_idx)
+            writer.add_scalar('perbatch_loss/depth_loss',stats_batch['depth'],batch_idx)
+            writer.add_scalar('perbatch_loss/size3d_loss',stats_batch['size3d'],batch_idx)
+            writer.add_scalar('perbatch_loss/heading_clsloss',stats_batch['heading_cls'],batch_idx)
+            writer.add_scalar('perbatch_loss/heading_regloss',stats_batch['heading_reg'],batch_idx)
+            writer.add_scalar('perbatch_loss/grouploss',stats_batch['grouploss'],batch_idx)
+
             total_loss.backward()
             self.optimizer.step()
 
             progress_bar.update()
-        # loss_dicts['total_loss']=loss_dicts['total_loss']
-        # loss_dicts['seg']=loss_dicts['seg']
-        # loss_dicts['offset2d']=loss_dicts['offset2d']
-        # loss_dicts['size2d']=loss_dicts['size2d']/425
-        # loss_dicts['offset3d']=loss_dicts['offset3d']
-        # loss_dicts['depth']=loss_dicts['depth']/425
-        # loss_dicts['size3d']=loss_dicts['size3d']/425
-        # loss_dicts['heading_cls_loss']= loss_dicts['heading_cls_loss']/425
-        # loss_dicts['heading_reg_loss']= loss_dicts['heading_reg_loss']/425
+        
         progress_bar.close()
         return loss_dicts
 

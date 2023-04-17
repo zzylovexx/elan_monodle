@@ -115,5 +115,5 @@ class Tester(object):
 
 
     def evaluate(self):
-        self.dataloader.dataset.eval(results_dir='./outputs/data', logger=self.logger)
+        self.dataloader.dataset.eval(results_dir=f'{self.output_dir}/data', logger=self.logger)
 
