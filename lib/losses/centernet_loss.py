@@ -6,9 +6,18 @@ from lib.helpers.decode_helper import _transpose_and_gather_feat
 from lib.losses.focal_loss import focal_loss_cornernet
 from lib.losses.uncertainty_loss import laplacian_aleatoric_uncertainty_loss
 from lib.losses.dim_aware_loss import dim_aware_l1_loss
+import math
+#torch.pi = (torch.acos(torch.zeros(1)).item() * 2)
 
+def myclass2angle(bin_class,residual):
+    # angle_per_class=2*torch.pi/float(12)
+    angle_per_class=0.5235987755
+    angle=angle_per_class*bin_class.float()
+    angle=angle+residual
+    # print(angle)
+    return angle
 
-def compute_centernet3d_loss(input, target):
+def compute_centernet3d_loss(input, target,info):
     stats_dict = {}
 
     seg_loss = compute_segmentation_loss(input, target)
@@ -17,7 +26,7 @@ def compute_centernet3d_loss(input, target):
     offset3d_loss = compute_offset3d_loss(input, target)
     depth_loss = compute_depth_loss(input, target)
     size3d_loss = compute_size3d_loss(input, target)
-    heading_cls_loss,heading_reg_loss,grouploss = compute_heading_loss(input, target)
+    heading_cls_loss,heading_reg_loss,grouploss = compute_heading_loss(input, target,info)
 
     # statistics
     stats_dict['seg'] = seg_loss.item()
@@ -80,35 +89,43 @@ def compute_size3d_loss(input, target):
     return size3d_loss
 
 
-def compute_heading_loss(input, target):
+def compute_heading_loss(input, target,info):
     heading_input = _transpose_and_gather_feat(input['heading'], target['indices'])   # B * C * H * W ---> B * K * C
     heading_input = heading_input.view(-1, 24)
     heading_target_cls = target['heading_bin'].view(-1)
     heading_target_res = target['heading_res'].view(-1)
     mask = target['mask_2d'].view(-1)
     group=target['group'].view(-1)
+    theta_ray=target['theta_ray'].view(-1)
+    theta_ray=theta_ray[mask]
     group_mask=group[mask]
     # classification loss
     heading_input_cls = heading_input[:, 0:12]
     heading_input_cls, heading_target_cls = heading_input_cls[mask], heading_target_cls[mask]
-    grouploss=group_loss(heading_input_cls,group_mask)
+
+    heading_input_cls_argmax_test=torch.argmax(heading_input_cls,dim=1) #regress class argmax
     if mask.sum() > 0:
         cls_loss = F.cross_entropy(heading_input_cls, heading_target_cls, reduction='mean')
     else:
         cls_loss = 0.0
-    
     # regression loss
     heading_input_res = heading_input[:, 12:24]
     heading_input_res, heading_target_res = heading_input_res[mask], heading_target_res[mask]
     cls_onehot = torch.zeros(heading_target_cls.shape[0], 12).cuda().scatter_(dim=1, index=heading_target_cls.view(-1, 1), value=1)
     heading_input_res = torch.sum(heading_input_res * cls_onehot, 1)
     
+    regress_alpha=myclass2angle(heading_input_cls_argmax_test,heading_input_res)
+    gt_alpha=myclass2angle(heading_target_cls,heading_target_res)
+    regress_ry=theta_ray+regress_alpha
+    gt_ry=theta_ray+gt_alpha
+
+    grouploss=group_loss(regress_ry,gt_ry,group_mask)
     reg_loss = F.l1_loss(heading_input_res, heading_target_res, reduction='mean')
     return cls_loss , reg_loss, grouploss
 
-def group_loss(input,targert_group):
+def group_loss(input_angle,target_angle,targert_group):
     group_target=targert_group.detach()#這邊detach我不太確定只是感覺不要動到target
-    input_group_idx=torch.argmax(input,dim=1).float().requires_grad_(True)#取最大confidence 的bin_class
+    #input_group_idx=torch.argmax(input,dim=1).float().requires_grad_(True)#取最大confidence 的bin_class
     unique_target=torch.unique(group_target)#targert_group中不重複的數字並組成一個新的tensor list並遍歷
     grouploss=0
     for element_group_number in unique_target:
@@ -117,7 +134,9 @@ def group_loss(input,targert_group):
         if len(index)==1:
             continue
         index=index.squeeze() #下一個argument dim 對齊
-        value_tensor_list=torch.index_select(input_group_idx,dim=0,index=index) #input_class取跟target相同的index 我們的目標就是希望她們越來越一致
+        value_tensor_list=torch.index_select(input_angle,dim=0,index=index) #input取跟target相同的index 我們的目標就是希望她們越來越一致
+        gt_tensor_list=torch.index_select(target_angle, dim=0, index=index)
+        value_tensor_list=torch.abs(value_tensor_list-gt_tensor_list)
         value_tensor_list=value_tensor_list.float()
         
         dev=torch.std(value_tensor_list) #caculate each groups stanrd varience
